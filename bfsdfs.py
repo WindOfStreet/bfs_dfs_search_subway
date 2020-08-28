@@ -68,13 +68,12 @@ class SubwaySearch:
         if mode != 'bfs' and mode != 'dfs':
             raise ValueError()
 
-        graph = self.station_dist                            # 测试完了改一下
         candidate = [[start]]
         success = []
         while not success:
             head = candidate[0]
             candidate.remove(candidate[0])
-            next_list = graph[head[-1]].keys()
+            next_list = self.station_dist[head[-1]].keys()
             new_route = []
             for next_one in next_list:
                 if next_one == destination:
@@ -158,7 +157,6 @@ class SubwaySearch:
         # mode：模式：min_dist-最短距离，min_transfer-最少换乘
         if mode != 'min_dist' and mode != 'min_transfer':
             raise ValueError('must be')
-        graph = self.station_dist                                           # 测试完了改一下
         # 先以bfs计算出一个解，其他解和它比较，不满足的可以提前移除
         # 计算bfs解及其距离、换乘次数
         success = self.search(start, destination, 'bfs')
@@ -169,7 +167,7 @@ class SubwaySearch:
         while candidate:
             head = candidate[0]
             candidate.remove(candidate[0])
-            next_list = graph[head[-1]].keys()
+            next_list = self.station_dist[head[-1]].keys()
             new_route = []
             for next_one in next_list:
                 if next_one == destination:
