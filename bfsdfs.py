@@ -8,6 +8,8 @@ class SubwaySearch:
     def __init__(self, ):
         self.station_dist = {}   # 相邻站点间距离信息:station_dist[s1][s2] = 1000m
         self.line_station = {}   # 存放各个线路包含的站点:line_station['1号线']={s1,s2,...}
+        self.mean_dist = 0       # 相邻站点间平均距离:结果为1200m
+        self.transfer_lines = []  # 换乘计划
 
     def create_connections(self, connect_save_path, stations_save_path):
         # 计算站点间距离和邻居关系
@@ -43,6 +45,17 @@ class SubwaySearch:
                     self.station_dist[s2] = dict([(s1, distance)] + list(self.station_dist[s2].items()))
                 else:
                     self.station_dist[s2] = {s1: distance}
+
+        # 计算站间平均距离
+        cnt = 0
+        total_dist = 0
+        for item in self.station_dist.values():
+            cnt += len(item)
+            for val in item.values():
+                total_dist += val
+        self.mean_dist = total_dist / cnt
+
+        # 保存数据
         f = open(connect_save_path, 'wb')
         pickle.dump(self.station_dist, f)
         f.close()
@@ -123,13 +136,23 @@ class SubwaySearch:
             for j in range(station_cnt-1):
                 count.iloc[i, j] = table.iloc[i, j] + table.iloc[i, j+1]
 
+        '''
         # 对于count的每一行（每一条地铁线路），若此行包含元素=2的值，则route线路换乘了此地铁线路
         transfer_lines = []
         for line_name in count.index:
             if 2 in count.loc[line_name, :].values:
                 transfer_lines.append(line_name)
+        '''
+        # 按列取出换乘的线路，这样保留了先后顺序
+        stop_list = []
+        self.transfer_lines.clear()
+        for col in count.columns:
+            for idx in count.index:
+                if count.loc[idx, col] == 2 and idx not in stop_list:
+                    stop_list.append(idx)
+                    self.transfer_lines.append(idx)
 
-        return len(transfer_lines)
+        return len(self.transfer_lines)-1
 
     def __compare(self, dist0, tran0, line_new, mode):
         # 比较新线路是否在给定的模式下更优，更优则返回true
@@ -137,15 +160,34 @@ class SubwaySearch:
         # tran0：当前最小换乘次数
         # 待计算的线路
         # mode：模式：距离最短/换乘最少
+        dist1 = self.__calc_dist(line_new)  # 新线路行驶距离
+        tran1 = self.__calc_transfers(line_new)  # 新线路换乘次数
+        rst = False  # 返回结果
+
+        # 换乘次数判据：在最短距离模式下，若新路线的换乘次数超过一定数值，则同样认定新线路不是更优的
+        tran_criterion = 0
+        # 总行驶距离判据：在最少换乘模式下，若新线路行驶距离超过一定数值，则同样认定新线路不是更优的
+        dist_criterion = 0
+        if dist0 < 5000:
+            # 5000m以内时，距离最短线路可以多换乘1次
+            tran_criterion = 1
+            # 5000m以内，少换乘线路可以多行驶3000m
+            dist_criterion = 3000
+        elif dist0 < 10000:
+            tran_criterion = 2
+            dist_criterion = 5000
+        else:
+            tran_criterion = 3
+            dist_criterion = 6000
+
         if mode == 'min_dist':
-            dist1 = self.__calc_dist(line_new)
-            if dist1 < dist0:
+            if dist1 < dist0 and tran1 - tran0 < tran_criterion:
                 return True
             else:
                 return False
         else:
-            tran1 = self.__calc_transfers(line_new)
-            if tran1 < tran0:
+            if tran1 < tran0 and dist1 - dist0 < dist_criterion:
+                #print(tran0,dist0,tran1,dist1)
                 return True
             else:
                 return False
@@ -155,6 +197,12 @@ class SubwaySearch:
         # start:起始站点
         # destination:终止站点
         # mode：模式：min_dist-最短距离，min_transfer-最少换乘
+        # return:
+        # success: 最优路线
+        # curt_dist：路线距离
+        # curt_trans：换乘次数
+        # self.transfer_lines：按序换乘的车次
+
         if mode != 'min_dist' and mode != 'min_transfer':
             raise ValueError('must be')
         # 先以bfs计算出一个解，其他解和它比较，不满足的可以提前移除
@@ -175,6 +223,8 @@ class SubwaySearch:
                     tmp.append(next_one)
                     if self.__compare(curt_dist, curt_trans, tmp, mode):
                         success = tmp.copy()
+                        curt_dist = self.__calc_dist(success)
+                        curt_trans = self.__calc_transfers(success)
                 elif next_one in head:
                     continue
                 else:
@@ -187,18 +237,20 @@ class SubwaySearch:
                 continue
             else:
                 candidate.extend(new_route)
-        if mode == 'min_dist':
-            return success, curt_dist
-        else:
-            return success, curt_trans
+        # 更新一下换乘车次列表
+        self.__calc_transfers(success)
+        return success, curt_dist, curt_trans, self.transfer_lines
 
 
 if __name__ == '__main__':
     # 收集临近站点资料的网页和官网地图信息不一致，地图包含的线路日期更新
     station_connect_path = 'data/connections.dict'
     line_stations_path = 'data/stations.dict'
-    subway = SubwaySearch()
-    subway.create_connections(station_connect_path, line_stations_path)
+
+
+    # 训练模型
+    # subway = SubwaySearch()
+    # subway.create_connections(station_connect_path, line_stations_path)
 
     # 深度优先/广度优先
     # rst = search(graph, '天安门东', '北新桥', mode='bfs')
@@ -213,6 +265,6 @@ if __name__ == '__main__':
     # 从文件加载模型
     subway1 = SubwaySearch()
     subway1.load_data(station_connect_path, line_stations_path)
-    rst1, dist = subway1.search_best('永安里', '广渠门外', 'min_dist')
-    print('最短线路：{}，距离为{}米。'.format(rst1, dist))
+    rst, dist, trans, trans_lines = subway1.search_best('公主坟', '什刹海', 'min_transfer')
+    print('线路：{}，距离为{}米。\n换乘{}次，换乘车次为{}。'.format(rst, dist, trans, trans_lines))
 
